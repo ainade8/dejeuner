@@ -797,7 +797,13 @@ def user_team_tab():
             aggfunc="sum",
             fill_value=0,
         )
-        st.dataframe(heat.style.background_gradient(axis=None))
+
+        #Tentative de heatmap stylée
+        try:
+            import matplotlib
+            st.dataframe(heat.style.background_gradient(axis=None))
+        except ImportError:
+            st.dataframe(heat)
     else:
         st.info("Pas assez de données pour afficher une heatmap.")
 
