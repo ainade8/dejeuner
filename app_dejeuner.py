@@ -373,7 +373,7 @@ def admin_panel():
             save_tops(tops_df)
 
             st.success(f"Utilisateur '{selected_user}' et ses réponses ont été supprimés.")
-            st.experimental_rerun()
+            st.rerun()
 
 
 # ==============================
