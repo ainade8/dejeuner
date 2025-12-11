@@ -14,6 +14,7 @@ DATA_DIR = "data"
 USERS_PATH = os.path.join(DATA_DIR, "users.csv")
 TOPS_PATH = os.path.join(DATA_DIR, "tops.csv")
 RESTAURANTS_PATH = "Restaurants.xlsx"
+ADMIN_USER_ID = "admin admin"
 
 
 # ==============================
@@ -88,8 +89,6 @@ def construire_score_directionnel(serie, slider_val, low_is_best=False):
         - Chaleur : 1 = froid, 10 = chaud
         - Healthy : 1 = pas healthy, 10 = healthy
         - Sandwich : 1 = bol, 10 = sandwich
-
-    low_is_best = True si, conceptuellement, on veut favoriser les valeurs basses.
     """
     if slider_val == 5:
         return None
@@ -153,17 +152,16 @@ def calculer_score_global(df, coeffs, scores_dyn):
 
 def calculer_similarites(tops_df: pd.DataFrame, current_user_id: str):
     """
-    tops_df : dataframe filtré sur la date du jour.
+    tops_df : dataframe filtré sur la date du jour (sans admin).
     Retourne une liste de dicts :
       {"user_id", "prenom", "nom", "description", "score_sim", "restos_communs"}
     """
     if tops_df.empty:
         return []
 
-    # On a besoin aussi du fichier users pour la description
     users_df = load_users()
 
-    # Trouver le top de l'utilisateur courant
+    # Top de l'utilisateur courant
     my_rows = tops_df[tops_df["user_id"] == current_user_id]
     if my_rows.empty:
         return []
@@ -173,7 +171,6 @@ def calculer_similarites(tops_df: pd.DataFrame, current_user_id: str):
     my_pos = {r: i + 1 for i, r in enumerate(my_top) if isinstance(r, str)}
 
     similitudes = []
-
     others = tops_df[tops_df["user_id"] != current_user_id]
 
     for _, row in others.iterrows():
@@ -189,7 +186,6 @@ def calculer_similarites(tops_df: pd.DataFrame, current_user_id: str):
         for resto in communs:
             score_sim += (4 - my_pos[resto]) + (4 - other_pos[resto])
 
-        # Récup description
         u = users_df[users_df["user_id"] == row["user_id"]]
         desc = ""
         if not u.empty:
@@ -211,7 +207,7 @@ def calculer_similarites(tops_df: pd.DataFrame, current_user_id: str):
 
 
 # ==============================
-# Auth & session
+# Session & auth
 # ==============================
 
 def init_session():
@@ -223,6 +219,8 @@ def init_session():
         st.session_state["prenom"] = None
     if "nom" not in st.session_state:
         st.session_state["nom"] = None
+    if "is_admin" not in st.session_state:
+        st.session_state["is_admin"] = False
 
 
 def login_block():
@@ -241,9 +239,22 @@ def login_block():
             st.sidebar.error("Prénom, nom et mot de passe sont obligatoires.")
             return
 
+        # Cas admin (spécial)
+        if prenom.strip().lower() == "admin" and nom.strip().lower() == "admin":
+            if password == "admin":
+                st.session_state["logged_in"] = True
+                st.session_state["is_admin"] = True
+                st.session_state["user_id"] = ADMIN_USER_ID
+                st.session_state["prenom"] = "admin"
+                st.session_state["nom"] = "admin"
+                st.sidebar.success("Connecté en tant qu'admin.")
+            else:
+                st.sidebar.error("Mot de passe admin incorrect.")
+            return
+
+        # Cas utilisateur normal
         users_df = load_users()
         user_id = f"{prenom.strip()} {nom.strip()}"
-
         existing = users_df[users_df["user_id"] == user_id]
 
         if not existing.empty:
@@ -251,6 +262,7 @@ def login_block():
             stored_pwd = existing.iloc[0]["password"]
             if password == stored_pwd:
                 st.session_state["logged_in"] = True
+                st.session_state["is_admin"] = False
                 st.session_state["user_id"] = user_id
                 st.session_state["prenom"] = prenom.strip()
                 st.session_state["nom"] = nom.strip()
@@ -258,7 +270,7 @@ def login_block():
             else:
                 st.sidebar.error("Mot de passe incorrect.")
         else:
-            # Nouvel utilisateur -> on crée le compte
+            # Nouveau compte
             new_row = {
                 "user_id": user_id,
                 "prenom": prenom.strip(),
@@ -270,17 +282,22 @@ def login_block():
             save_users(users_df)
 
             st.session_state["logged_in"] = True
+            st.session_state["is_admin"] = False
             st.session_state["user_id"] = user_id
             st.session_state["prenom"] = prenom.strip()
             st.session_state["nom"] = nom.strip()
             st.sidebar.success(f"Bienvenue {prenom}, ton compte a été créé !")
 
     if st.session_state["logged_in"]:
-        st.sidebar.markdown(
-            f"✅ Connecté en tant que **{st.session_state['prenom']} {st.session_state['nom']}**"
-        )
+        if st.session_state["is_admin"]:
+            st.sidebar.markdown("✅ Connecté en tant que **admin**")
+        else:
+            st.sidebar.markdown(
+                f"✅ Connecté en tant que **{st.session_state['prenom']} {st.session_state['nom']}**"
+            )
         if st.sidebar.button("Se déconnecter"):
             st.session_state["logged_in"] = False
+            st.session_state["is_admin"] = False
             st.session_state["user_id"] = None
             st.session_state["prenom"] = None
             st.session_state["nom"] = None
@@ -293,22 +310,20 @@ def delete_account_block():
 
     if st.button("Supprimer mon compte et toutes mes réponses"):
         user_id = st.session_state.get("user_id")
-        if not user_id:
-            st.warning("Aucun compte connecté.")
+        if not user_id or st.session_state.get("is_admin"):
+            st.warning("Aucun compte utilisateur standard connecté.")
             return
 
-        # Supprimer des users
         users_df = load_users()
         users_df = users_df[users_df["user_id"] != user_id]
         save_users(users_df)
 
-        # Supprimer des tops
         tops_df = load_tops()
         tops_df = tops_df[tops_df["user_id"] != user_id]
         save_tops(tops_df)
 
-        # Reset session
         st.session_state["logged_in"] = False
+        st.session_state["is_admin"] = False
         st.session_state["user_id"] = None
         st.session_state["prenom"] = None
         st.session_state["nom"] = None
@@ -318,24 +333,58 @@ def delete_account_block():
 
 
 # ==============================
-# App principale
+# Admin panel
 # ==============================
 
-def main():
-    st.set_page_config(page_title="App Déjeuner", page_icon="🍽️", layout="wide")
+def admin_panel():
+    st.title("🔑 Espace admin – gestion des comptes")
 
-    init_session()
-    login_block()
+    users_df = load_users()
+    tops_df = load_tops()
 
-    st.title("🍽️ Choisis ton déjeuner idéal")
+    # Exclure admin au cas où il serait dans les fichiers (sécurité)
+    if not users_df.empty and "user_id" in users_df.columns:
+        users_df = users_df[users_df["user_id"].str.lower() != ADMIN_USER_ID]
 
-    if not st.session_state["logged_in"]:
-        st.info("Connecte-toi dans la barre latérale pour commencer.")
-        return
+    if not tops_df.empty and "user_id" in tops_df.columns:
+        tops_df = tops_df[tops_df["user_id"].str.lower() != ADMIN_USER_ID]
 
-    df = charger_restaurants()
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("Nombre d'utilisateurs inscrits", len(users_df))
+    with col2:
+        st.metric("Nombre total de réponses enregistrées", len(tops_df))
 
-    # Nettoyage des NaN sur les colonnes de score
+    st.subheader("👥 Liste des utilisateurs")
+    if users_df.empty:
+        st.info("Aucun utilisateur inscrit pour l'instant.")
+    else:
+        st.dataframe(users_df[["user_id", "prenom", "nom", "description"]].reset_index(drop=True))
+
+        # Suppression ciblée
+        user_ids = users_df["user_id"].tolist()
+        selected_user = st.selectbox("Choisir un utilisateur à supprimer", user_ids)
+
+        if st.button("❌ Supprimer cet utilisateur et toutes ses réponses"):
+            users_df = users_df[users_df["user_id"] != selected_user]
+            save_users(users_df)
+
+            tops_df = tops_df[tops_df["user_id"] != selected_user]
+            save_tops(tops_df)
+
+            st.success(f"Utilisateur '{selected_user}' et ses réponses ont été supprimés.")
+            st.experimental_rerun()
+
+
+# ==============================
+# App utilisateur (non-admin)
+# ==============================
+
+def user_personal_tab(df):
+    """Onglet 'Mon dej idéal' : critères, top 3, top 10, similarités, suppression compte."""
+    st.header("1️⃣ Tes priorités (importance de chaque critère)")
+
+    # Nettoyage NaN
     score_cols = [
         "Score_Distance",
         "Score_Prix",
@@ -348,17 +397,6 @@ def main():
     for col in score_cols:
         if col in df.columns and df[col].isna().any():
             df[col].fillna(df[col].mean(), inplace=True)
-
-    st.write(
-        "Réponds à quelques questions, on pondère les critères, "
-        "et on te propose le **top 3** des restos qui te correspondent le mieux."
-    )
-
-    # ==========================
-    # 1️⃣ Importance des critères
-    # ==========================
-
-    st.header("1️⃣ Tes priorités (importance de chaque critère)")
 
     distance_coeff = st.slider(
         "À quel point tu veux un resto **proche** ?",
@@ -408,10 +446,6 @@ def main():
     else:
         st.caption(f"🤤 Importance de la gourmandise : **{gourmandise_coeff}/10**")
 
-    # ==========================
-    # 2️⃣ Style de déjeuner
-    # ==========================
-
     st.header("2️⃣ Style de déjeuner")
 
     chaleur_slider = st.slider(
@@ -456,10 +490,6 @@ def main():
     else:
         st.caption("🥣 Tu es plutôt dans un mood **bol**.")
 
-    # ==========================
-    # 3️⃣ Contraintes fortes
-    # ==========================
-
     st.header("3️⃣ Contraintes fortes")
 
     conv_choice = st.radio(
@@ -477,7 +507,7 @@ def main():
         else:
             st.warning("Colonne 'Filtre_Convention' absente, impossible d'appliquer ce filtre.")
 
-    # No-go sur Filtre_Type
+    # No-go
     if "Filtre_Type" in df_filtre.columns:
         types_dispos = sorted(df_filtre["Filtre_Type"].dropna().unique().tolist())
         no_go = st.multiselect(
@@ -485,11 +515,9 @@ def main():
             options=types_dispos,
             help="Les types sélectionnés seront exclus des propositions."
         )
-
         if no_go:
             no_go_str = ", ".join([f"<span style='color:red'>{t}</span>" for t in no_go])
             st.markdown(f"No-go sélectionnés : {no_go_str}", unsafe_allow_html=True)
-
             df_filtre = df_filtre[~df_filtre["Filtre_Type"].isin(no_go)]
     else:
         st.warning("Colonne 'Filtre_Type' absente, impossible de gérer les no-go.")
@@ -498,18 +526,21 @@ def main():
         st.error("Aucun restaurant ne correspond à ces filtres (conventionnel / no-go). Allège un peu les contraintes 😉")
         st.stop()
 
-    # ==========================
-    # 4️⃣ Calcul des scores et top 3 / top 10
-    # ==========================
+    # 4️⃣ Calcul des scores
+    st.header("4️⃣ Résultat")
 
     max_coeff_base = max(distance_coeff, prix_coeff, quantite_coeff, gourmandise_coeff)
     filtre_coeff_base = max_coeff_base if max_coeff_base > 0 else 1
 
-    scores_dyn = {}
-    scores_dyn["distance"] = df_filtre["Score_Distance"] if "Score_Distance" in df_filtre.columns else None
-    scores_dyn["prix"] = df_filtre["Score_Prix"] if "Score_Prix" in df_filtre.columns else None
-    scores_dyn["quantite"] = df_filtre["Score_Quantite"] if "Score_Quantite" in df_filtre.columns else None
-    scores_dyn["gourmandise"] = df_filtre["Score_Gourmandise"] if "Score_Gourmandise" in df_filtre.columns else None
+    scores_dyn = {
+        "distance": df_filtre["Score_Distance"] if "Score_Distance" in df_filtre.columns else None,
+        "prix": df_filtre["Score_Prix"] if "Score_Prix" in df_filtre.columns else None,
+        "quantite": df_filtre["Score_Quantite"] if "Score_Quantite" in df_filtre.columns else None,
+        "gourmandise": df_filtre["Score_Gourmandise"] if "Score_Gourmandise" in df_filtre.columns else None,
+        "chaleur": None,
+        "healthy": None,
+        "sandwich": None,
+    }
 
     coeffs = {
         "distance": distance_coeff,
@@ -522,37 +553,35 @@ def main():
     }
 
     if "Filtre_Chaleur" in df_filtre.columns:
-        score_chaleur = construire_score_directionnel(df_filtre["Filtre_Chaleur"], chaleur_slider, low_is_best=False)
-        scores_dyn["chaleur"] = score_chaleur
-        if score_chaleur is not None:
+        sc = construire_score_directionnel(df_filtre["Filtre_Chaleur"], chaleur_slider, low_is_best=False)
+        scores_dyn["chaleur"] = sc
+        if sc is not None:
             coeffs["chaleur"] = filtre_coeff_base
 
     if "Filtre_Healthy" in df_filtre.columns:
-        score_healthy = construire_score_directionnel(df_filtre["Filtre_Healthy"], healthy_slider, low_is_best=False)
-        scores_dyn["healthy"] = score_healthy
-        if score_healthy is not None:
+        sc = construire_score_directionnel(df_filtre["Filtre_Healthy"], healthy_slider, low_is_best=False)
+        scores_dyn["healthy"] = sc
+        if sc is not None:
             coeffs["healthy"] = filtre_coeff_base
 
     if "Filtre_Sandwich" in df_filtre.columns:
-        score_sandwich = construire_score_directionnel(df_filtre["Filtre_Sandwich"], sandwich_slider, low_is_best=False)
-        scores_dyn["sandwich"] = score_sandwich
-        if score_sandwich is not None:
+        sc = construire_score_directionnel(df_filtre["Filtre_Sandwich"], sandwich_slider, low_is_best=False)
+        scores_dyn["sandwich"] = sc
+        if sc is not None:
             coeffs["sandwich"] = filtre_coeff_base
 
     df_scored = df_filtre.copy()
     df_scored = calculer_score_global(df_scored, coeffs, scores_dyn)
     df_scored = df_scored.sort_values("Score_Global", ascending=False)
 
-    st.header("4️⃣ Résultat")
+    top3 = df_scored.head(3)
+    top10 = df_scored.head(10)
 
     st.subheader("🏆 Ton Top 3")
-    top3 = df_scored.head(3)
-
     if top3.empty:
         st.warning("Aucun restaurant après calcul des scores. Essaie de relâcher quelques contraintes.")
     else:
         cols_top = st.columns(len(top3))
-
         for idx, (_, row) in enumerate(top3.iterrows()):
             with cols_top[idx]:
                 nom_restau = row["Restaurant"] if "Restaurant" in row else f"Restaurant #{idx+1}"
@@ -577,12 +606,9 @@ def main():
                     f"- Gourmandise : {row['Score_Gourmandise'] if 'Score_Gourmandise' in row else 'n.a.'}"
                 )
 
-    # Top 10
     show_top10 = st.toggle("📜 Voir le top 10")
-    if show_top10:
+    if show_top10 and not top10.empty:
         st.subheader("📜 Top 10 détaillé")
-        top10 = df_scored.head(10).copy()
-
         colonnes_affichage = [
             "Restaurant",
             "Filtre_Type",
@@ -594,22 +620,13 @@ def main():
             "Score_Gourmandise",
         ]
         colonnes_affichage = [c for c in colonnes_affichage if c in top10.columns]
-
-        if not colonnes_affichage:
-            st.dataframe(top10)
+        df_aff = top10[colonnes_affichage].reset_index(drop=True)
+        if "Score_Global" in df_aff.columns:
+            st.dataframe(df_aff.style.highlight_max(subset=["Score_Global"], color="#d4edda"))
         else:
-            df_aff = top10[colonnes_affichage].reset_index(drop=True)
-            if "Score_Global" in df_aff.columns:
-                st.dataframe(
-                    df_aff.style.highlight_max(subset=["Score_Global"], color="#d4edda")
-                )
-            else:
-                st.dataframe(df_aff)
+            st.dataframe(df_aff)
 
-    # ==========================
-    # 5️⃣ Sauvegarde du top 3 du jour + similarités
-    # ==========================
-
+    # 5️⃣ Sauvegarde top 3 + similarités + suppression compte
     st.header("5️⃣ Partage & similarités")
 
     today_str = date.today().isoformat()
@@ -621,11 +638,12 @@ def main():
         if st.button("💾 Enregistrer mon top 3 pour aujourd'hui"):
             tops_df = load_tops()
 
-            # On supprime l'éventuel enregistrement existant pour ce user et ce jour
+            # Exclure admin par sécurité
+            tops_df = tops_df[tops_df["user_id"].str.lower() != ADMIN_USER_ID]
+
             mask = ~((tops_df["user_id"] == user_id) & (tops_df["date"] == today_str))
             tops_df = tops_df[mask]
 
-            # Construire la nouvelle ligne
             r1 = top3.iloc[0]["Restaurant"] if "Restaurant" in top3.columns else ""
             r2 = top3.iloc[1]["Restaurant"] if len(top3) > 1 and "Restaurant" in top3.columns else ""
             r3 = top3.iloc[2]["Restaurant"] if len(top3) > 2 and "Restaurant" in top3.columns else ""
@@ -652,18 +670,16 @@ def main():
 
             st.success("Ton top 3 du jour a été enregistré ✅")
 
-    # Similarités
     tops_df = load_tops()
+    tops_df = tops_df[tops_df["user_id"].str.lower() != ADMIN_USER_ID]
     tops_today = tops_df[tops_df["date"] == today_str]
 
     st.subheader("👥 Qui te ressemble aujourd'hui ?")
-    if tops_today.empty:
-        st.info("Personne n'a encore enregistré son top 3 aujourd'hui.")
+    if tops_today.empty or not any(tops_today["user_id"] == user_id):
+        st.caption("Enregistre ton top 3 pour voir avec qui tu matches 😉")
     else:
         similitudes = calculer_similarites(tops_today, user_id)
-        if not any((tops_today["user_id"] == user_id)):
-            st.caption("Enregistre ton top 3 pour voir avec qui tu matches 😉")
-        elif not similitudes:
+        if not similitudes:
             st.info("Personne n'a de resto en commun avec toi dans le top 3 aujourd'hui.")
         else:
             for s in similitudes:
@@ -675,11 +691,176 @@ def main():
                 st.write(f"🌯 Restos en commun dans le top 3 : **{s['restos_communs']}**")
                 st.markdown("---")
 
-    # ==========================
-    # 6️⃣ Suppression de compte
-    # ==========================
-
     delete_account_block()
+
+
+def user_team_tab():
+    """Onglet 'Vue d'équipe' : consensualité, équipe recommandée, heatmap, liste des répondants du jour."""
+    st.header("👥 Vue d'équipe – aujourd'hui")
+
+    today_str = date.today().isoformat()
+    tops_df = load_tops()
+    if tops_df.empty:
+        st.info("Personne n'a encore enregistré son top 3.")
+        return
+
+    tops_df = tops_df[tops_df["user_id"].str.lower() != ADMIN_USER_ID]
+    tops_today = tops_df[tops_df["date"] == today_str]
+
+    if tops_today.empty:
+        st.info("Personne n'a encore enregistré son top 3 aujourd'hui.")
+        return
+
+    # 1) Resto le plus consensuel
+    st.subheader("🏆 Resto le plus consensuel")
+
+    scores_resto = {}
+    counts_resto = {}
+
+    for _, row in tops_today.iterrows():
+        for col, weight in [("Restau_1", 3), ("Restau_2", 2), ("Restau_3", 1)]:
+            resto = row[col]
+            if not isinstance(resto, str) or resto.strip() == "":
+                continue
+            resto = resto.strip()
+            scores_resto[resto] = scores_resto.get(resto, 0) + weight
+            counts_resto[resto] = counts_resto.get(resto, 0) + 1
+
+    if not scores_resto:
+        st.info("Impossible de calculer un resto consensuel (tops vides ?).")
+    else:
+        df_cons = pd.DataFrame(
+            {
+                "Restaurant": list(scores_resto.keys()),
+                "Score_consensus": list(scores_resto.values()),
+                "Nb_personnes": [counts_resto[r] for r in scores_resto.keys()],
+            }
+        ).sort_values(["Score_consensus", "Nb_personnes"], ascending=False)
+
+        best = df_cons.iloc[0]
+        st.metric(
+            "Resto le plus consensuel du jour",
+            f"{best['Restaurant']}",
+            help="Score de consensus basé sur la position dans les tops (3 points pour un top 1, 2 pour top 2, 1 pour top 3)."
+        )
+        st.write(df_cons.reset_index(drop=True))
+
+        # 2) Équipe de dej recommandée autour de ce resto
+        st.subheader("🧑‍🤝‍🧑 Équipe de dej recommandée")
+        resto_ref = best["Restaurant"]
+
+        subset = tops_today[
+            (tops_today["Restau_1"] == resto_ref)
+            | (tops_today["Restau_2"] == resto_ref)
+            | (tops_today["Restau_3"] == resto_ref)
+        ].copy()
+
+        if subset.empty:
+            st.info("Personne n'a ce resto dans son top 3 (bizarre, vu qu'il est consensuel 😅).")
+        else:
+            users_df = load_users()
+            users_df = users_df[users_df["user_id"].str.lower() != ADMIN_USER_ID]
+
+            subset = subset.merge(
+                users_df[["user_id", "description"]],
+                on="user_id",
+                how="left"
+            )
+
+            st.caption(f"Autour de **{resto_ref}**, voici l'équipe de dej recommandée :")
+            for _, row in subset.iterrows():
+                st.markdown(f"- **{row['prenom']} {row['nom']}**")
+                if isinstance(row.get("description", ""), str) and row["description"].strip():
+                    st.caption(f"_\"{row['description']}\"_")
+
+    # 3) Heatmap des préférences
+    st.subheader("🔥 Heatmap des préférences (poids 3/2/1)")
+
+    records = []
+    for _, row in tops_today.iterrows():
+        uid = row["user_id"]
+        label = f"{row['prenom']} {row['nom']}"
+        for col, weight in [("Restau_1", 3), ("Restau_2", 2), ("Restau_3", 1)]:
+            resto = row[col]
+            if not isinstance(resto, str) or resto.strip() == "":
+                continue
+            records.append(
+                {"Personne": label, "Restaurant": resto.strip(), "Poids": weight}
+            )
+
+    if records:
+        df_long = pd.DataFrame(records)
+        heat = df_long.pivot_table(
+            index="Personne",
+            columns="Restaurant",
+            values="Poids",
+            aggfunc="sum",
+            fill_value=0,
+        )
+        st.dataframe(heat.style.background_gradient(axis=None))
+    else:
+        st.info("Pas assez de données pour afficher une heatmap.")
+
+    # 4) Liste des répondants du jour
+    st.subheader("📋 Liste de tous ceux qui ont répondu aujourd'hui")
+
+    users_df = load_users()
+    users_df = users_df[users_df["user_id"].str.lower() != ADMIN_USER_ID]
+
+    tops_today = tops_today.merge(
+        users_df[["user_id", "description"]],
+        on="user_id",
+        how="left"
+    )
+
+    for _, row in tops_today.iterrows():
+        st.markdown(f"### {row['prenom']} {row['nom']}")
+        if isinstance(row.get("description", ""), str) and row["description"].strip():
+            st.caption(f"_\"{row['description']}\"_")
+        st.write(
+            f"1️⃣ {row['Restau_1']}\n\n"
+            f"2️⃣ {row['Restau_2']}\n\n"
+            f"3️⃣ {row['Restau_3']}"
+        )
+        st.markdown("---")
+
+
+# ==============================
+# App principale
+# ==============================
+
+def main():
+    st.set_page_config(page_title="App Déjeuner", page_icon="🍽️", layout="wide")
+
+    init_session()
+    login_block()
+
+    if not st.session_state["logged_in"]:
+        st.title("🍽️ Choisis ton déjeuner idéal")
+        st.info("Connecte-toi dans la barre latérale pour commencer.")
+        return
+
+    # Cas admin
+    if st.session_state["is_admin"]:
+        admin_panel()
+        return
+
+    # Cas utilisateur normal
+    st.title("🍽️ Choisis ton déjeuner idéal")
+
+    df = charger_restaurants()
+
+    tab1, tab2 = st.tabs(["🔍 Mon dej idéal", "👥 Vue d'équipe"])
+
+    with tab1:
+        st.write(
+            "Réponds à quelques questions, on pondère les critères, "
+            "et on te propose le **top 3** des restos qui te correspondent le mieux."
+        )
+        user_personal_tab(df)
+
+    with tab2:
+        user_team_tab()
 
 
 if __name__ == "__main__":
