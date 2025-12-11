@@ -1,6 +1,9 @@
+# app_tinder_resto.py
+
 import streamlit as st
 import pandas as pd
 import os
+import random
 from datetime import date
 
 # ============================
@@ -11,6 +14,8 @@ DATA_DIR = "data"
 USERS_PATH = os.path.join(DATA_DIR, "users.csv")
 SWIPES_PATH = os.path.join(DATA_DIR, "tinder_swipes.csv")
 RESTAURANTS_PATH = "Restaurants.xlsx"
+
+ADMIN_USER_ID = "admin admin"
 
 
 # ============================
@@ -66,6 +71,8 @@ def load_restaurants() -> pd.DataFrame:
 def init_session():
     if "logged_in" not in st.session_state:
         st.session_state["logged_in"] = False
+    if "is_admin" not in st.session_state:
+        st.session_state["is_admin"] = False
     if "user_id" not in st.session_state:
         st.session_state["user_id"] = None
     if "prenom" not in st.session_state:
@@ -76,6 +83,8 @@ def init_session():
         st.session_state["swipe_index"] = 0
     if "last_feedback" not in st.session_state:
         st.session_state["last_feedback"] = ""
+    if "match_popup" not in st.session_state:
+        st.session_state["match_popup"] = {"show": False, "resto": None, "people": [], "index": 0}
 
 
 def login_block():
@@ -94,6 +103,23 @@ def login_block():
             st.sidebar.error("Prénom, nom et mot de passe sont obligatoires.")
             return
 
+        # === Cas ADMIN ===
+        if prenom.strip().lower() == "admin" and nom.strip().lower() == "admin":
+            if password == "admin":
+                st.session_state["logged_in"] = True
+                st.session_state["is_admin"] = True
+                st.session_state["user_id"] = ADMIN_USER_ID
+                st.session_state["prenom"] = "admin"
+                st.session_state["nom"] = "admin"
+                st.session_state["swipe_index"] = 0
+                st.session_state["last_feedback"] = ""
+                st.session_state["match_popup"] = {"show": False, "resto": None, "people": [], "index": 0}
+                st.sidebar.success("Connecté en tant qu'admin.")
+            else:
+                st.sidebar.error("Mot de passe admin incorrect.")
+            return
+
+        # === Cas utilisateur normal ===
         users_df = load_users()
         user_id = f"{prenom.strip()} {nom.strip()}"
         existing = users_df[users_df["user_id"] == user_id]
@@ -102,11 +128,13 @@ def login_block():
             stored_pwd = existing.iloc[0]["password"]
             if password == stored_pwd:
                 st.session_state["logged_in"] = True
+                st.session_state["is_admin"] = False
                 st.session_state["user_id"] = user_id
                 st.session_state["prenom"] = prenom.strip()
                 st.session_state["nom"] = nom.strip()
                 st.session_state["swipe_index"] = 0
                 st.session_state["last_feedback"] = ""
+                st.session_state["match_popup"] = {"show": False, "resto": None, "people": [], "index": 0}
                 st.sidebar.success(f"Re-bonjour {prenom} !")
             else:
                 st.sidebar.error("Mot de passe incorrect.")
@@ -122,30 +150,41 @@ def login_block():
             save_users(users_df)
 
             st.session_state["logged_in"] = True
+            st.session_state["is_admin"] = False
             st.session_state["user_id"] = user_id
             st.session_state["prenom"] = prenom.strip()
             st.session_state["nom"] = nom.strip()
             st.session_state["swipe_index"] = 0
             st.session_state["last_feedback"] = ""
+            st.session_state["match_popup"] = {"show": False, "resto": None, "people": [], "index": 0}
             st.sidebar.success(f"Bienvenue {prenom}, ton compte a été créé !")
 
     if st.session_state["logged_in"]:
-        st.sidebar.markdown(
-            f"✅ Connecté en tant que **{st.session_state['prenom']} {st.session_state['nom']}**"
-        )
+        if st.session_state["is_admin"]:
+            st.sidebar.markdown("✅ Connecté en tant que **admin**")
+        else:
+            st.sidebar.markdown(
+                f"✅ Connecté en tant que **{st.session_state['prenom']} {st.session_state['nom']}**"
+            )
         if st.sidebar.button("Se déconnecter"):
             st.session_state["logged_in"] = False
+            st.session_state["is_admin"] = False
             st.session_state["user_id"] = None
             st.session_state["prenom"] = None
             st.session_state["nom"] = None
             st.session_state["swipe_index"] = 0
             st.session_state["last_feedback"] = ""
+            st.session_state["match_popup"] = {"show": False, "resto": None, "people": [], "index": 0}
             st.sidebar.info("Déconnecté.")
 
 
 def delete_account_block():
     st.subheader("🗑️ Supprimer mon compte et mes swipes")
     st.caption("Tu peux supprimer ton compte et toutes tes réponses à tout moment.")
+
+    if st.session_state.get("is_admin"):
+        st.info("Tu es connecté en admin, gère les suppressions depuis le panneau admin.")
+        return
 
     if st.button("Supprimer mon compte et toutes mes réponses"):
         user_id = st.session_state.get("user_id")
@@ -162,14 +201,80 @@ def delete_account_block():
         save_swipes(swipes_df)
 
         st.session_state["logged_in"] = False
+        st.session_state["is_admin"] = False
         st.session_state["user_id"] = None
         st.session_state["prenom"] = None
         st.session_state["nom"] = None
         st.session_state["swipe_index"] = 0
         st.session_state["last_feedback"] = ""
+        st.session_state["match_popup"] = {"show": False, "resto": None, "people": [], "index": 0}
 
         st.success("Ton compte et toutes tes réponses ont été supprimés.")
         st.stop()
+
+
+# ============================
+# Panneau admin
+# ============================
+
+def admin_panel():
+    st.title("🔑 Panneau admin – gestion globale")
+
+    users_df = load_users()
+    swipes_df = load_swipes()
+
+    today_str = date.today().isoformat()
+    total_users = len(users_df)
+    total_swipes = len(swipes_df)
+    swipes_today = len(swipes_df[swipes_df["date"] == today_str]) if not swipes_df.empty else 0
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Utilisateurs inscrits", total_users)
+    with col2:
+        st.metric("Swipes totaux", total_swipes)
+    with col3:
+        st.metric("Swipes aujourd'hui", swipes_today)
+
+    st.markdown("---")
+    st.subheader("👥 Utilisateurs")
+
+    if users_df.empty:
+        st.info("Aucun utilisateur inscrit.")
+    else:
+        st.dataframe(users_df[["user_id", "prenom", "nom", "description"]].reset_index(drop=True))
+
+        user_ids = users_df["user_id"].tolist()
+        selected_user = st.selectbox("Choisir un utilisateur à supprimer", user_ids)
+
+        if st.button("❌ Supprimer cet utilisateur et toutes ses réponses"):
+            users_df = users_df[users_df["user_id"] != selected_user]
+            save_users(users_df)
+
+            swipes_df = swipes_df[swipes_df["user_id"] != selected_user]
+            save_swipes(swipes_df)
+
+            st.success(f"Utilisateur '{selected_user}' et ses swipes ont été supprimés.")
+            st.rerun()
+
+    st.markdown("---")
+    st.subheader("🧹 Nettoyage des swipes")
+
+    col_a, col_b = st.columns(2)
+    with col_a:
+        if st.button("🗑️ Supprimer tous les swipes d'aujourd'hui"):
+            if not swipes_df.empty:
+                swipes_df = swipes_df[swipes_df["date"] != today_str]
+                save_swipes(swipes_df)
+            st.success("Tous les swipes d'aujourd'hui ont été supprimés.")
+            st.rerun()
+
+    with col_b:
+        if st.button("🔥 Supprimer tous les swipes (toutes dates)"):
+            empty = pd.DataFrame(columns=["date", "user_id", "prenom", "nom", "restaurant", "decision"])
+            save_swipes(empty)
+            st.success("Tous les swipes ont été supprimés.")
+            st.rerun()
 
 
 # ============================
@@ -177,7 +282,7 @@ def delete_account_block():
 # ============================
 
 def render_resto_card(row):
-    """Affiche une carte sexy pour un resto."""
+    """Affiche une carte sexy pour un resto, pensée mobile (quasi plein écran)."""
     name = row.get("Restaurant", "Restaurant mystère")
     type_txt = row.get("Filtre_Type", "")
     dist_txt = ""
@@ -191,22 +296,34 @@ def render_resto_card(row):
 
     card_html = f"""
     <div style="
-        border-radius: 18px;
-        padding: 22px;
-        background: linear-gradient(135deg, #ffe6f0, #ffffff);
-        box-shadow: 0 10px 25px rgba(0,0,0,0.08);
-        margin: 10px 0 25px 0;
-        border: 1px solid rgba(255, 192, 203, 0.5);
+        height: 75vh;
+        max-height: 680px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
     ">
-        <div style="font-size: 24px; font-weight: 700; margin-bottom: 6px; color: #333;">
-            {name}
-        </div>
-        <div style="font-size: 13px; color: #777; margin-bottom: 10px;">
-            {subline}
-        </div>
-        <div style="font-size: 13px; color: #999;">
-            Swipe mentalement : est-ce que tu te verrais déjeuner là ?
-        </div>
+      <div style="
+          width: 100%;
+          max-width: 420px;
+          border-radius: 24px;
+          padding: 24px 20px;
+          background: linear-gradient(145deg, #ffe6f0, #ffffff);
+          box-shadow: 0 14px 35px rgba(0,0,0,0.12);
+          border: 1px solid rgba(255, 192, 203, 0.6);
+      ">
+          <div style="font-size: 14px; text-transform: uppercase; letter-spacing: 1px; color: #e91e63; margin-bottom: 6px;">
+              🍽️ Proposition de dej
+          </div>
+          <div style="font-size: 26px; font-weight: 800; margin-bottom: 8px; color: #333;">
+              {name}
+          </div>
+          <div style="font-size: 13px; color: #777; margin-bottom: 14px;">
+              {subline}
+          </div>
+          <div style="font-size: 12px; color: #999;">
+              Imagine que tu swipes à droite ou à gauche : est-ce que tu te verrais déjeuner ici aujourd'hui ?
+          </div>
+      </div>
     </div>
     """
     st.markdown(card_html, unsafe_allow_html=True)
@@ -218,8 +335,64 @@ def swipe_tab(df: pd.DataFrame):
     today_str = date.today().isoformat()
     user_id = st.session_state["user_id"]
 
+    # === Popup MATCH prioritaire si présente ===
+    popup = st.session_state.get("match_popup", None)
+    if popup and popup.get("show"):
+        resto_name = popup.get("resto", "Restaurant mystère")
+        people = popup.get("people", [])
+        base_idx = popup.get("index", 0)
+
+        names_html = "<br>".join([f"• {p}" for p in people]) if people else "… et d'autres peut-être"
+
+        popup_html = f"""
+        <div style="
+            height: 75vh;
+            max-height: 680px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        ">
+          <div style="
+              width: 100%;
+              max-width: 420px;
+              border-radius: 24px;
+              padding: 26px 22px;
+              background: radial-gradient(circle at top, #ff97b7, #8e24aa);
+              box-shadow: 0 18px 40px rgba(0,0,0,0.35);
+              color: white;
+              text-align: center;
+          ">
+              <div style="font-size: 34px; font-weight: 900; letter-spacing: 2px; margin-bottom: 6px;">
+                  MATCH 💘
+              </div>
+              <div style="font-size: 18px; margin-bottom: 16px;">
+                  sur <span style="font-weight: 800;">{resto_name}</span>
+              </div>
+              <div style="font-size: 13px; opacity: 0.9; margin-bottom: 10px;">
+                  Vous avez liké ce resto en commun avec :
+              </div>
+              <div style="font-size: 15px; font-weight: 600; margin-bottom: 18px;">
+                  {names_html}
+              </div>
+              <div style="font-size: 11px; opacity: 0.8;">
+                  (Et peut-être d'autres collègues inconnus de l'algorithme 🤫)
+              </div>
+          </div>
+        </div>
+        """
+        st.markdown(popup_html, unsafe_allow_html=True)
+
+        st.write("")
+        st.write("")
+        if st.button("➡️ Passer au resto suivant"):
+            st.session_state["swipe_index"] = base_idx + 1
+            st.session_state["match_popup"]["show"] = False
+            st.session_state["last_feedback"] = ""
+            st.rerun()
+        return
+
     # Boutons Reset & Retour arrière
-    col_reset, col_back, _ = st.columns([1.5, 1.5, 3])
+    col_reset, col_back, _ = st.columns([1.8, 1.8, 2.4])
     with col_reset:
         if st.button("🧹 Réinitialiser mes choix d'aujourd'hui"):
             swipes_df = load_swipes()
@@ -229,6 +402,7 @@ def swipe_tab(df: pd.DataFrame):
                 save_swipes(swipes_df)
             st.session_state["swipe_index"] = 0
             st.session_state["last_feedback"] = ""
+            st.session_state["match_popup"] = {"show": False, "resto": None, "people": [], "index": 0}
             st.rerun()
 
     with col_back:
@@ -237,7 +411,6 @@ def swipe_tab(df: pd.DataFrame):
             if idx <= 0:
                 st.caption("Tu es déjà au début 😉")
             else:
-                # On supprime le dernier swipe du jour pour cet utilisateur (quel que soit le resto)
                 swipes_df = load_swipes()
                 if not swipes_df.empty:
                     mask = (swipes_df["user_id"] == user_id) & (swipes_df["date"] == today_str)
@@ -248,6 +421,7 @@ def swipe_tab(df: pd.DataFrame):
                         save_swipes(swipes_df)
                 st.session_state["swipe_index"] = idx - 1
                 st.session_state["last_feedback"] = ""
+                st.session_state["match_popup"] = {"show": False, "resto": None, "people": [], "index": 0}
                 st.rerun()
 
     idx = st.session_state.get("swipe_index", 0)
@@ -268,7 +442,6 @@ def swipe_tab(df: pd.DataFrame):
     prenom = st.session_state["prenom"]
     nom = st.session_state["nom"]
 
-    # On regarde les likes des autres AUJOURD'HUI
     swipes_df_before = load_swipes()
     if not swipes_df_before.empty:
         likes_others = swipes_df_before[
@@ -286,8 +459,7 @@ def swipe_tab(df: pd.DataFrame):
     with col_yes:
         yes_btn = st.button("❤️ Chaud", use_container_width=True)
 
-    feedback = ""
-
+    # === LIKE ===
     if yes_btn:
         swipes_df = load_swipes()
         new_row = {
@@ -302,24 +474,27 @@ def swipe_tab(df: pd.DataFrame):
         save_swipes(swipes_df)
 
         if not likes_others.empty:
-            feedback = "MATCH 💥"
             names = [f"{r['prenom']} {r['nom']}" for _, r in likes_others.iterrows()]
-            names_str = ", ".join(sorted(set(names)))
-            st.markdown(
-                f"<div style='padding:12px 18px; border-radius:999px; background:#ffe6f0; "
-                f"display:inline-block; font-weight:600; color:#c2185b; margin-top:5px;'>"
-                f"MATCH avec {names_str} sur **{resto_name}** 💘"
-                f"</div>",
-                unsafe_allow_html=True,
-            )
+            names = list(sorted(set(names)))
+            if len(names) > 3:
+                names_sample = random.sample(names, 3)
+            else:
+                names_sample = names
+
+            st.session_state["match_popup"] = {
+                "show": True,
+                "resto": resto_name,
+                "people": names_sample,
+                "index": idx,
+            }
+            st.rerun()
         else:
-            feedback = "Premier like sur ce resto, tu ouvres la voie 😉"
-            st.caption(feedback)
+            st.session_state["swipe_index"] = idx + 1
+            st.session_state["last_feedback"] = "Premier like sur ce resto, tu ouvres la voie 😉"
+            st.session_state["match_popup"] = {"show": False, "resto": None, "people": [], "index": 0}
+            st.rerun()
 
-        st.session_state["swipe_index"] = idx + 1
-        st.session_state["last_feedback"] = feedback
-        st.rerun()
-
+    # === DISLIKE ===
     if no_btn:
         swipes_df = load_swipes()
         new_row = {
@@ -337,6 +512,7 @@ def swipe_tab(df: pd.DataFrame):
             st.caption("Dommage, t'as manqué un match 😅 (mais t'as le droit d'avoir du goût différent)")
         st.session_state["swipe_index"] = idx + 1
         st.session_state["last_feedback"] = ""
+        st.session_state["match_popup"] = {"show": False, "resto": None, "people": [], "index": 0}
         st.rerun()
 
     if st.session_state.get("last_feedback"):
@@ -421,11 +597,16 @@ def main():
     init_session()
     login_block()
 
-    st.title("💘 Tinder des restos")
-
     if not st.session_state["logged_in"]:
+        st.title("💘 Tinder des restos")
         st.info("Connecte-toi dans la barre latérale pour commencer à swiper.")
         return
+
+    if st.session_state["is_admin"]:
+        admin_panel()
+        return
+
+    st.title("💘 Tinder des restos")
 
     df_restos = load_restaurants()
 
