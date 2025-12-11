@@ -301,6 +301,7 @@ def render_resto_card(row):
         display: flex;
         align-items: center;
         justify-content: center;
+        margin-top: -40px;
     ">
       <div style="
           width: 100%;
@@ -330,7 +331,7 @@ def render_resto_card(row):
 
 
 def swipe_tab(df: pd.DataFrame):
-    st.header("💘 Swipe tes restos")
+    # pas de gros header ici pour que la carte remonte au max
 
     today_str = date.today().isoformat()
     user_id = st.session_state["user_id"]
@@ -351,6 +352,7 @@ def swipe_tab(df: pd.DataFrame):
             display: flex;
             align-items: center;
             justify-content: center;
+            margin-top: -40px;
         ">
           <div style="
               width: 100%;
@@ -383,47 +385,17 @@ def swipe_tab(df: pd.DataFrame):
         st.markdown(popup_html, unsafe_allow_html=True)
 
         st.write("")
-        st.write("")
-        if st.button("➡️ Passer au resto suivant"):
-            st.session_state["swipe_index"] = base_idx + 1
-            st.session_state["match_popup"]["show"] = False
-            st.session_state["last_feedback"] = ""
-            st.rerun()
+        # bouton à droite
+        col_spacer, col_btn = st.columns([3, 1])
+        with col_btn:
+            if st.button("➡️ Suivant"):
+                st.session_state["swipe_index"] = base_idx + 1
+                st.session_state["match_popup"]["show"] = False
+                st.session_state["last_feedback"] = ""
+                st.rerun()
         return
 
-    # Boutons Reset & Retour arrière
-    col_reset, col_back, _ = st.columns([1.8, 1.8, 2.4])
-    with col_reset:
-        if st.button("🧹 Réinitialiser mes choix d'aujourd'hui"):
-            swipes_df = load_swipes()
-            if not swipes_df.empty:
-                mask = ~((swipes_df["user_id"] == user_id) & (swipes_df["date"] == today_str))
-                swipes_df = swipes_df[mask]
-                save_swipes(swipes_df)
-            st.session_state["swipe_index"] = 0
-            st.session_state["last_feedback"] = ""
-            st.session_state["match_popup"] = {"show": False, "resto": None, "people": [], "index": 0}
-            st.rerun()
-
-    with col_back:
-        if st.button("↩️ Revenir au précédent"):
-            idx = st.session_state.get("swipe_index", 0)
-            if idx <= 0:
-                st.caption("Tu es déjà au début 😉")
-            else:
-                swipes_df = load_swipes()
-                if not swipes_df.empty:
-                    mask = (swipes_df["user_id"] == user_id) & (swipes_df["date"] == today_str)
-                    last_swipes = swipes_df[mask]
-                    if not last_swipes.empty:
-                        last_idx = last_swipes.index[-1]
-                        swipes_df = swipes_df.drop(last_idx)
-                        save_swipes(swipes_df)
-                st.session_state["swipe_index"] = idx - 1
-                st.session_state["last_feedback"] = ""
-                st.session_state["match_popup"] = {"show": False, "resto": None, "people": [], "index": 0}
-                st.rerun()
-
+    # Index & contrôles swipe
     idx = st.session_state.get("swipe_index", 0)
     n = len(df)
 
@@ -453,11 +425,44 @@ def swipe_tab(df: pd.DataFrame):
     else:
         likes_others = pd.DataFrame(columns=["user_id", "prenom", "nom", "restaurant", "decision", "date"])
 
+    # Boutons OUI / NON côte à côte (sur desktop ; sur mobile Streamlit les empilera)
     col_no, col_yes = st.columns(2)
     with col_no:
-        no_btn = st.button("❌ Pas chaud", use_container_width=True)
+        no_btn = st.button("❌ Pas chaud")
     with col_yes:
-        yes_btn = st.button("❤️ Chaud", use_container_width=True)
+        yes_btn = st.button("❤️ Chaud")
+
+    # Boutons reset / back en dessous
+    col_reset, col_back = st.columns(2)
+    with col_reset:
+        if st.button("🧹 Réinitialiser mes choix d'aujourd'hui"):
+            swipes_df = load_swipes()
+            if not swipes_df.empty:
+                mask = ~((swipes_df["user_id"] == user_id) & (swipes_df["date"] == today_str))
+                swipes_df = swipes_df[mask]
+                save_swipes(swipes_df)
+            st.session_state["swipe_index"] = 0
+            st.session_state["last_feedback"] = ""
+            st.session_state["match_popup"] = {"show": False, "resto": None, "people": [], "index": 0}
+            st.rerun()
+
+    with col_back:
+        if st.button("↩️ Revenir au précédent"):
+            if idx <= 0:
+                st.caption("Tu es déjà au début 😉")
+            else:
+                swipes_df = load_swipes()
+                if not swipes_df.empty:
+                    mask = (swipes_df["user_id"] == user_id) & (swipes_df["date"] == today_str)
+                    last_swipes = swipes_df[mask]
+                    if not last_swipes.empty:
+                        last_idx = last_swipes.index[-1]
+                        swipes_df = swipes_df.drop(last_idx)
+                        save_swipes(swipes_df)
+                st.session_state["swipe_index"] = idx - 1
+                st.session_state["last_feedback"] = ""
+                st.session_state["match_popup"] = {"show": False, "resto": None, "people": [], "index": 0}
+                st.rerun()
 
     # === LIKE ===
     if yes_btn:
@@ -525,6 +530,10 @@ def swipe_tab(df: pd.DataFrame):
 
 def matches_tab():
     st.header("💞 Mes matchs (aujourd'hui)")
+
+    # 🔁 bouton pour actualiser les matchs
+    if st.button("🔄 Actualiser les matchs"):
+        st.rerun()
 
     user_id = st.session_state["user_id"]
     swipes_df = load_swipes()
@@ -598,7 +607,8 @@ def main():
     login_block()
 
     if not st.session_state["logged_in"]:
-        st.title("💘 Tinder des restos")
+        # page très light pour que dès connexion on soit sur la carte
+        st.markdown("## 💘 Tinder des restos")
         st.info("Connecte-toi dans la barre latérale pour commencer à swiper.")
         return
 
@@ -606,8 +616,7 @@ def main():
         admin_panel()
         return
 
-    st.title("💘 Tinder des restos")
-
+    # pas de gros titre ici, on passe directement aux tabs & à la carte
     df_restos = load_restaurants()
 
     tab_swipe, tab_matches = st.tabs(["💖 Swipe", "💞 Mes matchs"])
