@@ -380,7 +380,7 @@ def admin_panel():
 # App utilisateur (non-admin)
 # ==============================
 
-def user_personal_tab(df):
+def user_personal_tab(df, user_id):
     """Onglet 'Mon dej idéal' : critères, top 3, top 10, similarités, suppression compte."""
     st.header("1️⃣ Tes priorités (importance de chaque critère)")
 
@@ -398,11 +398,39 @@ def user_personal_tab(df):
         if col in df.columns and df[col].isna().any():
             df[col].fillna(df[col].mean(), inplace=True)
 
+    # 🔁 On récupère les préférences du jour si elles existent déjà
+    today_str = date.today().isoformat()
+    tops_df = load_tops()
+    pref_row = None
+    if not tops_df.empty and "user_id" in tops_df.columns and "date" in tops_df.columns:
+        # éviter l'admin au cas où
+        tops_df = tops_df[tops_df["user_id"].str.lower() != ADMIN_USER_ID]
+        mask = (tops_df["user_id"] == user_id) & (tops_df["date"] == today_str)
+        if mask.any():
+            pref_row = tops_df[mask].iloc[0]
+
+    def get_pref(col, default=5):
+        if pref_row is None or col not in pref_row or pd.isna(pref_row[col]):
+            return default
+        try:
+            return int(float(pref_row[col]))
+        except Exception:
+            return default
+
+    # Valeurs par défaut des sliders (5 si pas d'historique pour aujourd'hui)
+    default_distance = get_pref("Distance_coeff", 5)
+    default_prix = get_pref("Prix_coeff", 5)
+    default_quantite = get_pref("Quantite_coeff", 5)
+    default_gourmandise = get_pref("Gourmandise_coeff", 5)
+    default_chaleur = get_pref("Chaleur_slider", 5)
+    default_healthy = get_pref("Healthy_slider", 5)
+    default_sandwich = get_pref("Sandwich_slider", 5)
+
     distance_coeff = st.slider(
         "À quel point tu veux un resto **proche** ?",
         min_value=0,
         max_value=10,
-        value=5,
+        value=default_distance,
         help="0 = la distance ne compte pas, 10 = c'est hyper important."
     )
     if distance_coeff == 0:
@@ -414,7 +442,7 @@ def user_personal_tab(df):
         "Est-ce que le **prix** compte ?",
         min_value=0,
         max_value=10,
-        value=5,
+        value=default_prix,
         help="0 = le prix ne compte pas, 10 = tu veux optimiser le budget."
     )
     if prix_coeff == 0:
@@ -426,7 +454,7 @@ def user_personal_tab(df):
         "T'as **très faim** ou ce n'est pas un critère ? (quantité)",
         min_value=0,
         max_value=10,
-        value=5,
+        value=default_quantite,
         help="0 = la quantité ne compte pas, 10 = tu veux bien manger."
     )
     if quantite_coeff == 0:
@@ -438,7 +466,7 @@ def user_personal_tab(df):
         "Tu cherches du **gourmand** ou pas vraiment ?",
         min_value=0,
         max_value=10,
-        value=5,
+        value=default_gourmandise,
         help="0 = la gourmandise ne compte pas, 10 = tu veux te faire plaisir."
     )
     if gourmandise_coeff == 0:
@@ -452,7 +480,7 @@ def user_personal_tab(df):
         "Plutôt **froid** ou **chaud** ?",
         min_value=0,
         max_value=10,
-        value=5,
+        value=default_chaleur,
         help="0 = très froid, 10 = très chaud, 5 = peu importe."
     )
     if chaleur_slider == 5:
@@ -466,7 +494,7 @@ def user_personal_tab(df):
         "Tu veux du **healthy** ?",
         min_value=0,
         max_value=10,
-        value=5,
+        value=default_healthy,
         help="0 = pas healthy (comfort food), 10 = très healthy, 5 = peu importe."
     )
     if healthy_slider == 5:
@@ -480,7 +508,7 @@ def user_personal_tab(df):
         "Plutôt **bol** ou **sandwich** ?",
         min_value=0,
         max_value=10,
-        value=5,
+        value=default_sandwich,
         help="0 = bol, 10 = sandwich, 5 = peu importe."
     )
     if sandwich_slider == 5:
@@ -507,7 +535,6 @@ def user_personal_tab(df):
         else:
             st.warning("Colonne 'Filtre_Convention' absente, impossible d'appliquer ce filtre.")
 
-    # No-go
     if "Filtre_Type" in df_filtre.columns:
         types_dispos = sorted(df_filtre["Filtre_Type"].dropna().unique().tolist())
         no_go = st.multiselect(
@@ -630,7 +657,6 @@ def user_personal_tab(df):
     st.header("5️⃣ Partage & similarités")
 
     today_str = date.today().isoformat()
-    user_id = st.session_state["user_id"]
     prenom = st.session_state["prenom"]
     nom = st.session_state["nom"]
 
@@ -638,7 +664,6 @@ def user_personal_tab(df):
         if st.button("💾 Enregistrer mon top 3 pour aujourd'hui"):
             tops_df = load_tops()
 
-            # Exclure admin par sécurité
             tops_df = tops_df[tops_df["user_id"].str.lower() != ADMIN_USER_ID]
 
             mask = ~((tops_df["user_id"] == user_id) & (tops_df["date"] == today_str))
@@ -652,6 +677,7 @@ def user_personal_tab(df):
             s2 = top3.iloc[1]["Score_Global"] if len(top3) > 1 and "Score_Global" in top3.columns else ""
             s3 = top3.iloc[2]["Score_Global"] if len(top3) > 2 and "Score_Global" in top3.columns else ""
 
+            # 🔐 On sauvegarde aussi les choix de sliders du jour
             new_row = {
                 "date": today_str,
                 "user_id": user_id,
@@ -663,6 +689,13 @@ def user_personal_tab(df):
                 "Score_1": str(s1),
                 "Score_2": str(s2),
                 "Score_3": str(s3),
+                "Distance_coeff": distance_coeff,
+                "Prix_coeff": prix_coeff,
+                "Quantite_coeff": quantite_coeff,
+                "Gourmandise_coeff": gourmandise_coeff,
+                "Chaleur_slider": chaleur_slider,
+                "Healthy_slider": healthy_slider,
+                "Sandwich_slider": sandwich_slider,
             }
 
             tops_df = pd.concat([tops_df, pd.DataFrame([new_row])], ignore_index=True)
@@ -697,6 +730,31 @@ def user_personal_tab(df):
 def user_team_tab():
     """Onglet 'Vue d'équipe' : consensualité, équipe recommandée, heatmap, liste des répondants du jour."""
     st.header("👥 Vue d'équipe – aujourd'hui")
+
+    # 🔄 Bouton pour rafraîchir les réponses (si d'autres ont répondu entre temps)
+    if st.button("🔄 Actualiser les réponses du jour"):
+        st.rerun()
+
+    today_str = date.today().isoformat()
+    tops_df = load_tops()
+    if tops_df.empty:
+        st.info("Personne n'a encore enregistré son top 3.")
+        return
+
+    tops_df = tops_df[tops_df["user_id"].str.lower() != ADMIN_USER_ID]
+    tops_today = tops_df[tops_df["date"] == today_str]
+
+    if tops_today.empty:
+        st.info("Personne n'a encore enregistré son top 3 aujourd'hui.")
+        return
+
+def user_team_tab():
+    """Onglet 'Vue d'équipe' : consensualité, équipe recommandée, heatmap, liste des répondants du jour."""
+    st.header("👥 Vue d'équipe – aujourd'hui")
+
+    # 🔄 Bouton pour rafraîchir les réponses (si d'autres ont répondu entre temps)
+    if st.button("🔄 Actualiser les réponses du jour"):
+        st.rerun()
 
     today_str = date.today().isoformat()
     tops_df = load_tops()
@@ -863,7 +921,7 @@ def main():
             "Réponds à quelques questions, on pondère les critères, "
             "et on te propose le **top 3** des restos qui te correspondent le mieux."
         )
-        user_personal_tab(df)
+        user_personal_tab(df, user_id=st.session_state["user_id"])
 
     with tab2:
         user_team_tab()
