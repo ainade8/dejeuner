@@ -333,6 +333,11 @@ def render_resto_card(row):
 def swipe_tab(df: pd.DataFrame):
     today_str = date.today().isoformat()
     user_id = st.session_state["user_id"]
+    n = len(df)
+
+    if n == 0:
+        st.info("Aucun restaurant dans la base.")
+        return
 
     # === Popup MATCH prioritaire si présente ===
     popup = st.session_state.get("match_popup", None)
@@ -382,6 +387,11 @@ def swipe_tab(df: pd.DataFrame):
         """
         st.markdown(popup_html, unsafe_allow_html=True)
 
+        # compteur sur la popup
+        current = min(base_idx + 1, n)
+        st.markdown(f"**Resto {current} / {n}**")
+        st.progress(current / n)
+
         st.write("")
         col_spacer, col_btn = st.columns([3, 1])
         with col_btn:
@@ -393,11 +403,6 @@ def swipe_tab(df: pd.DataFrame):
         return
 
     idx = st.session_state.get("swipe_index", 0)
-    n = len(df)
-
-    if n == 0:
-        st.info("Aucun restaurant dans la base.")
-        return
 
     if idx >= n:
         st.success("Tu as vu tous les restos ! Recommence ou va voir tes matchs 💘")
@@ -405,6 +410,10 @@ def swipe_tab(df: pd.DataFrame):
 
     row = df.iloc[idx]
     render_resto_card(row)
+
+    # compteur sous la carte
+    st.markdown(f"**Resto {idx + 1} / {n}**")
+    st.progress((idx + 1) / n)
 
     resto_name = row["Restaurant"]
     prenom = st.session_state["prenom"]
@@ -421,12 +430,12 @@ def swipe_tab(df: pd.DataFrame):
     else:
         likes_others = pd.DataFrame(columns=["user_id", "prenom", "nom", "restaurant", "decision", "date"])
 
-    # Boutons OUI / NON côte à côte, même largeur
+    # Boutons "swipe" côte à côte, même largeur
     col_no, col_yes = st.columns(2)
     with col_no:
-        no_btn = st.button("❌ Pas chaud", use_container_width=True)
+        no_btn = st.button("⬅️ Swipe gauche (pas chaud)", use_container_width=True)
     with col_yes:
-        yes_btn = st.button("❤️ Chaud", use_container_width=True)
+        yes_btn = st.button("Swipe droite (chaud) ➡️", use_container_width=True)
 
     # Boutons reset / back en dessous
     col_reset, col_back = st.columns(2)
