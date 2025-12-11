@@ -282,7 +282,7 @@ def admin_panel():
 # ============================
 
 def render_resto_card(row):
-    """Affiche une carte sexy pour un resto, pensée mobile (quasi plein écran)."""
+    """Affiche une carte sexy pour un resto, taille alignée sur la carte de MATCH."""
     name = row.get("Restaurant", "Restaurant mystère")
     type_txt = row.get("Filtre_Type", "")
     dist_txt = ""
@@ -307,7 +307,7 @@ def render_resto_card(row):
           width: 100%;
           max-width: 420px;
           border-radius: 24px;
-          padding: 24px 20px;
+          padding: 26px 22px;
           background: linear-gradient(145deg, #ffe6f0, #ffffff);
           box-shadow: 0 14px 35px rgba(0,0,0,0.12);
           border: 1px solid rgba(255, 192, 203, 0.6);
@@ -331,8 +331,6 @@ def render_resto_card(row):
 
 
 def swipe_tab(df: pd.DataFrame):
-    # pas de gros header ici pour que la carte remonte au max
-
     today_str = date.today().isoformat()
     user_id = st.session_state["user_id"]
 
@@ -385,7 +383,6 @@ def swipe_tab(df: pd.DataFrame):
         st.markdown(popup_html, unsafe_allow_html=True)
 
         st.write("")
-        # bouton à droite
         col_spacer, col_btn = st.columns([3, 1])
         with col_btn:
             if st.button("➡️ Suivant"):
@@ -395,7 +392,6 @@ def swipe_tab(df: pd.DataFrame):
                 st.rerun()
         return
 
-    # Index & contrôles swipe
     idx = st.session_state.get("swipe_index", 0)
     n = len(df)
 
@@ -425,12 +421,12 @@ def swipe_tab(df: pd.DataFrame):
     else:
         likes_others = pd.DataFrame(columns=["user_id", "prenom", "nom", "restaurant", "decision", "date"])
 
-    # Boutons OUI / NON côte à côte (sur desktop ; sur mobile Streamlit les empilera)
+    # Boutons OUI / NON côte à côte, même largeur
     col_no, col_yes = st.columns(2)
     with col_no:
-        no_btn = st.button("❌ Pas chaud")
+        no_btn = st.button("❌ Pas chaud", use_container_width=True)
     with col_yes:
-        yes_btn = st.button("❤️ Chaud")
+        yes_btn = st.button("❤️ Chaud", use_container_width=True)
 
     # Boutons reset / back en dessous
     col_reset, col_back = st.columns(2)
@@ -531,7 +527,6 @@ def swipe_tab(df: pd.DataFrame):
 def matches_tab():
     st.header("💞 Mes matchs (aujourd'hui)")
 
-    # 🔁 bouton pour actualiser les matchs
     if st.button("🔄 Actualiser les matchs"):
         st.rerun()
 
@@ -607,7 +602,6 @@ def main():
     login_block()
 
     if not st.session_state["logged_in"]:
-        # page très light pour que dès connexion on soit sur la carte
         st.markdown("## 💘 Tinder des restos")
         st.info("Connecte-toi dans la barre latérale pour commencer à swiper.")
         return
@@ -616,7 +610,6 @@ def main():
         admin_panel()
         return
 
-    # pas de gros titre ici, on passe directement aux tabs & à la carte
     df_restos = load_restaurants()
 
     tab_swipe, tab_matches = st.tabs(["💖 Swipe", "💞 Mes matchs"])
