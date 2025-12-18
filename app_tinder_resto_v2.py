@@ -297,7 +297,7 @@ SWIPES_FILE = DATA_DIR / "swipes.json"
 def load_restaurants():
     """Charge la base de restaurants depuis Excel"""
     try:
-        df = pd.read_excel("restaurants.xlsx")
+        df = pd.read_excel("Restaurants.xlsx")
         # S'assurer que la colonne 'Restaurant' existe
         if 'Restaurant' not in df.columns:
             st.error("❌ Le fichier Excel doit contenir une colonne 'Restaurant'")
