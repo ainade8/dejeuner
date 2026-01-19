@@ -200,50 +200,62 @@ def calculer_scores(df: pd.DataFrame, w_temps: float, w_note: float, w_prix: flo
 restos_scores = calculer_scores(restos, importance_temps, importance_note, importance_prix)
 top3 = restos_scores.head(3)
 
-
 # =========================
-# PODIUM
+# TOP 3 – VERSION CLEAN
 # =========================
 st.markdown("## 🏆 Ton Top 3 du moment")
 
-col1, col2, col3 = st.columns([1, 1, 1])
+cols = st.columns(3)
 
-medals = ["🥇", "🥈", "🥉"]
-colors = ["#FFD700", "#C0C0C0", "#CD7F32"]
-positions = [col2, col1, col3]          # affichage 2-1-3
-podium_heights = ["120px", "150px", "100px"]
+ranks = ["#2", "#1", "#3"]
+order = [1, 0, 2]  # pour afficher 2 - 1 - 3
+border_colors = ["#CBD5E0", "#4C51BF", "#CBD5E0"]
+bg_colors = ["#FFFFFF", "#F7FAFF", "#FFFFFF"]
+name_sizes = ["1.4rem", "1.8rem", "1.4rem"]
 
-for i, (idx, resto) in enumerate(top3.iterrows()):
-    with positions[i]:
+for i, idx in enumerate(order):
+    resto = top3.iloc[idx]
+    with cols[i]:
         st.markdown(
             f"""
-            <div style='
-                background: linear-gradient(135deg, {colors[i]}20 0%, {colors[i]}40 100%);
-                border-radius: 15px;
+            <div style="
+                background: {bg_colors[idx]};
+                border: 2px solid {border_colors[idx]};
+                border-radius: 16px;
                 padding: 1.5rem;
                 text-align: center;
-                border: 3px solid {colors[i]};
-                height: {podium_heights[i]};
-                display: flex;
-                flex-direction: column;
-                justify-content: center;
-            '>
-                <div style='font-size: 3rem;'>{medals[i]}</div>
-                <div style='font-size: 1.3rem; font-weight: 800; color: #2d3748; margin: 0.4rem 0;'>
+                box-shadow: 0 6px 18px rgba(0,0,0,0.08);
+            ">
+                <div style="font-size: 0.9rem; color: #718096; margin-bottom: 0.3rem;">
+                    {ranks[idx]}
+                </div>
+
+                <div style="
+                    font-size: {name_sizes[idx]};
+                    font-weight: 800;
+                    color: #1A202C;
+                    margin-bottom: 0.6rem;
+                ">
                     {resto["nom"]}
                 </div>
-                <div style='font-size: 2rem; font-weight: 900; color: {colors[i]};'>
-                    {resto["score_final"]:.1f}/100
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
 
-        st.markdown(
-            f"""
-            <div style='text-align: center; margin-top: 0.8rem; font-size: 0.95rem; color:#2d3748;'>
-                ⏱️ {int(resto["temps_trajet"])} min &nbsp;|&nbsp; ⭐ {resto["note"]}/5 &nbsp;|&nbsp; 💰 {resto["prix"]}€
+                <div style="
+                    font-size: 2.2rem;
+                    font-weight: 900;
+                    color: #2B6CB0;
+                    margin-bottom: 0.8rem;
+                ">
+                    {resto["score_final"]:.1f}
+                </div>
+
+                <div style="
+                    font-size: 0.95rem;
+                    color: #4A5568;
+                ">
+                    ⏱️ {int(resto["temps_trajet"])} min &nbsp;•&nbsp;
+                    ⭐ {resto["note"]}/5 &nbsp;•&nbsp;
+                    💰 {resto["prix"]} €
+                </div>
             </div>
             """,
             unsafe_allow_html=True,
