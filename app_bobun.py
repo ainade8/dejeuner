@@ -201,65 +201,62 @@ restos_scores = calculer_scores(restos, importance_temps, importance_note, impor
 top3 = restos_scores.head(3)
 
 # =========================
-# TOP 3 – VERSION CLEAN
+# TOP 3 – VERSION CLEAN (HTML SAFE)
 # =========================
 st.markdown("## 🏆 Ton Top 3 du moment")
 
 cols = st.columns(3)
+order = [1, 0, 2]  # affichage #2 - #1 - #3
 
-ranks = ["#2", "#1", "#3"]
-order = [1, 0, 2]  # pour afficher 2 - 1 - 3
-border_colors = ["#CBD5E0", "#4C51BF", "#CBD5E0"]
-bg_colors = ["#FFFFFF", "#F7FAFF", "#FFFFFF"]
-name_sizes = ["1.4rem", "1.8rem", "1.4rem"]
-
-for i, idx in enumerate(order):
+for col, idx in zip(cols, order):
     resto = top3.iloc[idx]
-    with cols[i]:
-        st.markdown(
-            f"""
-            <div style="
-                background: {bg_colors[idx]};
-                border: 2px solid {border_colors[idx]};
-                border-radius: 16px;
-                padding: 1.5rem;
-                text-align: center;
-                box-shadow: 0 6px 18px rgba(0,0,0,0.08);
-            ">
-                <div style="font-size: 0.9rem; color: #718096; margin-bottom: 0.3rem;">
-                    {ranks[idx]}
-                </div>
 
-                <div style="
-                    font-size: {name_sizes[idx]};
-                    font-weight: 800;
-                    color: #1A202C;
-                    margin-bottom: 0.6rem;
-                ">
-                    {resto["nom"]}
-                </div>
+    col.html(f"""
+    <div style="
+        background: #FFFFFF;
+        border: {'2px solid #4C51BF' if idx == 0 else '1px solid #E2E8F0'};
+        border-radius: 18px;
+        padding: 1.6rem;
+        text-align: center;
+        box-shadow: 0 8px 24px rgba(0,0,0,0.08);
+    ">
 
-                <div style="
-                    font-size: 2.2rem;
-                    font-weight: 900;
-                    color: #2B6CB0;
-                    margin-bottom: 0.8rem;
-                ">
-                    {resto["score_final"]:.1f}
-                </div>
+        <div style="
+            font-size: 0.85rem;
+            color: #718096;
+            margin-bottom: 0.4rem;
+        ">
+            #{idx + 1}
+        </div>
 
-                <div style="
-                    font-size: 0.95rem;
-                    color: #4A5568;
-                ">
-                    ⏱️ {int(resto["temps_trajet"])} min &nbsp;•&nbsp;
-                    ⭐ {resto["note"]}/5 &nbsp;•&nbsp;
-                    💰 {resto["prix"]} €
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+        <div style="
+            font-size: {'1.9rem' if idx == 0 else '1.5rem'};
+            font-weight: 800;
+            color: #1A202C;
+            margin-bottom: 0.6rem;
+        ">
+            {resto["nom"]}
+        </div>
+
+        <div style="
+            font-size: 2.4rem;
+            font-weight: 900;
+            color: #2B6CB0;
+            margin-bottom: 0.8rem;
+        ">
+            {resto["score_final"]:.1f}
+        </div>
+
+        <div style="
+            font-size: 0.95rem;
+            color: #4A5568;
+        ">
+            ⏱️ {int(resto["temps_trajet"])} min &nbsp;•&nbsp;
+            ⭐ {resto["note"]}/5 &nbsp;•&nbsp;
+            💰 {resto["prix"]} €
+        </div>
+    </div>
+    """)
 
 
 # =========================
