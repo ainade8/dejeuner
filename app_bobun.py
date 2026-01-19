@@ -1,49 +1,135 @@
 import streamlit as st
 import pandas as pd
-import plotly.graph_objects as go
 
-# Configuration de la page
+# Plotly (si pas installé, on affiche un fallback)
+try:
+    import plotly.graph_objects as go
+    PLOTLY_OK = True
+except ModuleNotFoundError:
+    PLOTLY_OK = False
+
+
+# =========================
+# CONFIG PAGE + STYLE
+# =========================
 st.set_page_config(page_title="Quel bobun aujourd'hui ? 🍜", page_icon="🍜", layout="wide")
 
-# Style CSS personnalisé
-st.markdown("""
+st.markdown(
+    """
     <style>
-    .main {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    }
-    .stApp {
-        background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-    }
+    .main { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+    .stApp { background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%); }
     h1 {
         color: #2d3748;
         text-align: center;
         font-size: 3rem !important;
-        margin-bottom: 2rem;
+        margin-bottom: 1rem;
     }
-    .podium-container {
-        background: white;
-        border-radius: 20px;
-        padding: 2rem;
-        box-shadow: 0 10px 30px rgba(0,0,0,0.1);
-        margin: 2rem 0;
+    .sub {
+        text-align:center;
+        color:#4a5568;
+        margin-top:-10px;
+        margin-bottom: 1.5rem;
+        font-size: 1.2rem;
     }
     </style>
-""", unsafe_allow_html=True)
+    """,
+    unsafe_allow_html=True,
+)
 
-# Titre
 st.markdown("# 🍜 Quel bobun aujourd'hui ?")
-st.markdown("### Trouve ton resto parfait en ajustant tes préférences !")
+st.markdown("<div class='sub'>Trouve ton resto parfait en ajustant tes préférences !</div>", unsafe_allow_html=True)
 
-# Base de données des restos
-restos = pd.DataFrame({
-    'nom': ['Pho 11', 'L\'othentique Vietnam', 'Banemi', 'Song Heng', 
-            'Le petit Cambodge', 'James Bun', 'Entre 2 rives'],
-    'temps_trajet': [12, 13, 18, 14, 13, 7, 10],  # en minutes
-    'note': [3.8, 4.6, 4.6, 4.5, 4.8, 4.4, 4.5],  # sur 5
-    'prix': [11.80, 15.00, 14.90, 13.00, 15.50, 14.50, 14.00]  # en euros
+
+# =========================
+# DATA LOADING (EXCEL)
+# =========================
+EXCEL_PATH = "20260119 - Benchmark - Bo Bun.xlsx"
+
+DEFAULT_RESTOS = pd.DataFrame({
+    "nom": ["Pho 11", "L'othentique Vietnam", "Banemi", "Song Heng", "Le petit Cambodge", "James Bun", "Entre 2 rives"],
+    "temps_trajet": [12, 13, 18, 14, 13, 7, 10],
+    "note": [3.8, 4.6, 4.6, 4.5, 4.8, 4.4, 4.5],
+    "prix": [11.80, 15.00, 14.90, 13.00, 15.50, 14.50, 14.00],
 })
 
-# Sidebar pour les préférences
+def _normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Convertit une base Excel avec colonnes:
+    - Restaurant
+    - Temps de trajet
+    - Note
+    - Prix
+    vers les noms internes:
+    - nom, temps_trajet, note, prix
+    Tolère quelques variantes (espaces, underscore, casse).
+    """
+    df = df.copy()
+
+    # Nettoyage des noms de colonnes
+    df.columns = [str(c).strip() for c in df.columns]
+
+    # Mapping tolérant
+    mapping = {}
+    for c in df.columns:
+        key = c.strip().lower().replace("_", " ")
+        key = " ".join(key.split())  # espaces multiples -> un seul
+
+        if key in ["restaurant", "resto", "nom", "name"]:
+            mapping[c] = "nom"
+        elif key in ["temps de trajet", "temps trajet", "trajet", "temps", "tps trajet", "tps de trajet"]:
+            mapping[c] = "temps_trajet"
+        elif key in ["note", "rating", "score", "avis"]:
+            mapping[c] = "note"
+        elif key in ["prix", "price", "tarif", "cout", "coût"]:
+            mapping[c] = "prix"
+
+    df = df.rename(columns=mapping)
+
+    required = ["nom", "temps_trajet", "note", "prix"]
+    missing = [c for c in required if c not in df.columns]
+    if missing:
+        raise ValueError(f"Colonnes manquantes: {missing}. Colonnes détectées: {list(df.columns)}")
+
+    # Cast types
+    df["nom"] = df["nom"].astype(str).str.strip()
+    df["temps_trajet"] = pd.to_numeric(df["temps_trajet"], errors="coerce")
+    df["note"] = pd.to_numeric(df["note"], errors="coerce")
+    df["prix"] = pd.to_numeric(df["prix"], errors="coerce")
+
+    # On drop ce qui est incomplet
+    df = df.dropna(subset=required)
+
+    # Un peu de ménage
+    df = df[df["nom"] != ""]
+    return df
+
+
+@st.cache_data
+def load_restos_from_excel(path: str) -> pd.DataFrame:
+    # Par défaut: première feuille
+    df = pd.read_excel(path)
+    return _normalize_columns(df)
+
+
+def get_restos() -> pd.DataFrame:
+    try:
+        return load_restos_from_excel(EXCEL_PATH)
+    except FileNotFoundError:
+        st.warning(f"Fichier Excel introuvable (`{EXCEL_PATH}`). J'utilise une base intégrée temporaire.")
+        return DEFAULT_RESTOS
+    except Exception as e:
+        st.error(f"Erreur lecture Excel: {e}")
+        st.info("Je bascule sur la base intégrée temporaire.")
+        return DEFAULT_RESTOS
+
+
+restos = get_restos()
+
+
+# =========================
+# SIDEBAR (PREFERENCES)
+# =========================
 st.sidebar.markdown("## ⚙️ Ajuste tes priorités")
 st.sidebar.markdown("---")
 
@@ -52,70 +138,85 @@ importance_temps = st.sidebar.slider(
     min_value=0,
     max_value=10,
     value=5,
-    help="Plus c'est élevé, plus tu privilégies la proximité"
+    help="Plus c'est élevé, plus tu privilégies la proximité",
 )
-
 importance_note = st.sidebar.slider(
     "⭐ Importance de la note",
     min_value=0,
     max_value=10,
     value=5,
-    help="Plus c'est élevé, plus tu privilégies la qualité"
+    help="Plus c'est élevé, plus tu privilégies la qualité",
 )
-
 importance_prix = st.sidebar.slider(
     "💰 Importance du prix",
     min_value=0,
     max_value=10,
     value=5,
-    help="Plus c'est élevé, plus tu privilégies les prix bas"
+    help="Plus c'est élevé, plus tu privilégies les prix bas",
 )
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("**Astuce :** Tout à 0 = tous les critères comptent pareil ! 😉")
+st.sidebar.caption("Astuce : tout à 0 = pondération égale 😉")
 
-# Fonction de scoring
-def calculer_scores(df, w_temps, w_note, w_prix):
-    # Normaliser les valeurs entre 0 et 1
-    # Pour le temps et le prix, inverser (moins = mieux)
+
+# =========================
+# SCORING
+# =========================
+def safe_norm(series: pd.Series, invert: bool = False) -> pd.Series:
+    """Normalise en [0,1]. Si constante => 1 partout. invert=True => 1 - norm."""
+    mn, mx = series.min(), series.max()
+    if pd.isna(mn) or pd.isna(mx):
+        out = pd.Series([0.0] * len(series), index=series.index)
+    elif mx == mn:
+        out = pd.Series([1.0] * len(series), index=series.index)
+    else:
+        out = (series - mn) / (mx - mn)
+
+    return 1 - out if invert else out
+
+
+def calculer_scores(df: pd.DataFrame, w_temps: float, w_note: float, w_prix: float) -> pd.DataFrame:
     df = df.copy()
-    df['score_temps'] = 1 - (df['temps_trajet'] - df['temps_trajet'].min()) / (df['temps_trajet'].max() - df['temps_trajet'].min())
-    df['score_note'] = (df['note'] - df['note'].min()) / (df['note'].max() - df['note'].min())
-    df['score_prix'] = 1 - (df['prix'] - df['prix'].min()) / (df['prix'].max() - df['prix'].min())
-    
-    # Si tous les poids sont à 0, utiliser des poids égaux
+
+    # Scores critères (0..1)
+    df["score_temps"] = safe_norm(df["temps_trajet"], invert=True)  # moins = mieux
+    df["score_note"] = safe_norm(df["note"], invert=False)         # plus = mieux
+    df["score_prix"] = safe_norm(df["prix"], invert=True)          # moins = mieux
+
     total_weight = w_temps + w_note + w_prix
     if total_weight == 0:
-        w_temps, w_note, w_prix = 1, 1, 1
+        w_temps = w_note = w_prix = 1
         total_weight = 3
-    
-    # Calculer le score final pondéré
-    df['score_final'] = (
-        df['score_temps'] * w_temps +
-        df['score_note'] * w_note +
-        df['score_prix'] * w_prix
-    ) / total_weight * 100
-    
-    return df.sort_values('score_final', ascending=False)
 
-# Calculer les scores
+    df["score_final"] = (
+        df["score_temps"] * w_temps +
+        df["score_note"] * w_note +
+        df["score_prix"] * w_prix
+    ) / total_weight * 100
+
+    return df.sort_values("score_final", ascending=False)
+
+
 restos_scores = calculer_scores(restos, importance_temps, importance_note, importance_prix)
 top3 = restos_scores.head(3)
 
-# Affichage du podium
+
+# =========================
+# PODIUM
+# =========================
 st.markdown("## 🏆 Ton Top 3 du moment")
 
 col1, col2, col3 = st.columns([1, 1, 1])
 
-# Médailles et couleurs
-medals = ['🥇', '🥈', '🥉']
-colors = ['#FFD700', '#C0C0C0', '#CD7F32']
-positions = [col2, col1, col3]  # Pour afficher 2-1-3
-podium_heights = ['120px', '150px', '100px']
+medals = ["🥇", "🥈", "🥉"]
+colors = ["#FFD700", "#C0C0C0", "#CD7F32"]
+positions = [col2, col1, col3]          # affichage 2-1-3
+podium_heights = ["120px", "150px", "100px"]
 
 for i, (idx, resto) in enumerate(top3.iterrows()):
     with positions[i]:
-        st.markdown(f"""
+        st.markdown(
+            f"""
             <div style='
                 background: linear-gradient(135deg, {colors[i]}20 0%, {colors[i]}40 100%);
                 border-radius: 15px;
@@ -128,65 +229,65 @@ for i, (idx, resto) in enumerate(top3.iterrows()):
                 justify-content: center;
             '>
                 <div style='font-size: 3rem;'>{medals[i]}</div>
-                <div style='font-size: 1.3rem; font-weight: bold; color: #2d3748; margin: 0.5rem 0;'>
-                    {resto['nom']}
+                <div style='font-size: 1.3rem; font-weight: 800; color: #2d3748; margin: 0.4rem 0;'>
+                    {resto["nom"]}
                 </div>
-                <div style='font-size: 2rem; font-weight: bold; color: {colors[i]};'>
-                    {resto['score_final']:.1f}/100
+                <div style='font-size: 2rem; font-weight: 900; color: {colors[i]};'>
+                    {resto["score_final"]:.1f}/100
                 </div>
             </div>
-        """, unsafe_allow_html=True)
-        
-        st.markdown(f"""
-            <div style='text-align: center; margin-top: 1rem; font-size: 0.9rem;'>
-                ⏱️ {resto['temps_trajet']} min | ⭐ {resto['note']}/5 | 💰 {resto['prix']}€
-            </div>
-        """, unsafe_allow_html=True)
+            """,
+            unsafe_allow_html=True,
+        )
 
-# Graphique radar pour le gagnant
+        st.markdown(
+            f"""
+            <div style='text-align: center; margin-top: 0.8rem; font-size: 0.95rem; color:#2d3748;'>
+                ⏱️ {int(resto["temps_trajet"])} min &nbsp;|&nbsp; ⭐ {resto["note"]}/5 &nbsp;|&nbsp; 💰 {resto["prix"]}€
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+
+# =========================
+# WINNER DETAIL (RADAR)
+# =========================
 st.markdown("---")
 st.markdown("## 📊 Profil détaillé du gagnant")
 
 winner = top3.iloc[0]
+categories = ["Proximité", "Qualité", "Prix"]
+values = [winner["score_temps"] * 100, winner["score_note"] * 100, winner["score_prix"] * 100]
 
-fig = go.Figure()
+if PLOTLY_OK:
+    fig = go.Figure()
+    fig.add_trace(go.Scatterpolar(
+        r=values + [values[0]],
+        theta=categories + [categories[0]],
+        fill="toself",
+        name=winner["nom"],
+    ))
+    fig.update_layout(
+        polar=dict(radialaxis=dict(visible=True, range=[0, 100])),
+        showlegend=False,
+        height=420,
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+    )
+    st.plotly_chart(fig, use_container_width=True)
+else:
+    st.warning("Plotly n'est pas installé. Ajoute `plotly` dans requirements.txt pour afficher le radar.")
+    st.dataframe(pd.DataFrame({"Critère": categories, "Score (0-100)": [round(v, 1) for v in values]}), use_container_width=True)
 
-categories = ['Proximité', 'Qualité', 'Prix']
-values = [
-    winner['score_temps'] * 100,
-    winner['score_note'] * 100,
-    winner['score_prix'] * 100
-]
 
-fig.add_trace(go.Scatterpolar(
-    r=values + [values[0]],
-    theta=categories + [categories[0]],
-    fill='toself',
-    name=winner['nom'],
-    line_color='#667eea',
-    fillcolor='rgba(102, 126, 234, 0.3)'
-))
-
-fig.update_layout(
-    polar=dict(
-        radialaxis=dict(
-            visible=True,
-            range=[0, 100]
-        )
-    ),
-    showlegend=False,
-    height=400,
-    paper_bgcolor='rgba(0,0,0,0)',
-    plot_bgcolor='rgba(0,0,0,0)'
-)
-
-st.plotly_chart(fig, use_container_width=True)
-
-# Tableau complet
+# =========================
+# FULL RANKING
+# =========================
 with st.expander("📋 Voir le classement complet"):
-    display_df = restos_scores[['nom', 'temps_trajet', 'note', 'prix', 'score_final']].copy()
-    display_df.columns = ['Restaurant', 'Temps (min)', 'Note /5', 'Prix (€)', 'Score']
-    display_df['Score'] = display_df['Score'].round(1)
+    display_df = restos_scores[["nom", "temps_trajet", "note", "prix", "score_final"]].copy()
+    display_df.columns = ["Restaurant", "Temps (min)", "Note /5", "Prix (€)", "Score"]
+    display_df["Score"] = display_df["Score"].round(1)
     display_df.index = range(1, len(display_df) + 1)
     st.dataframe(display_df, use_container_width=True)
 
